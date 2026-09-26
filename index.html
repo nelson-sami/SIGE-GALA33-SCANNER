@@ -20,36 +20,33 @@ button{width:100%;padding:15px;margin-top:10px;border:0;border-radius:9px;backgr
 </head>
 <body>
 <div class="container">
-<h1>SIGE GALA 33</h1>
-<div class="subtitulo">Leitor de Entrada</div>
+<h1>SIGE GALA 33</h1><div class="subtitulo">Leitor de Entrada</div>
 <div id="telaLigacao" class="caixa"><strong>A LIGAR AO SIGE...</strong><div style="margin-top:8px;color:#bbb">Aguarde.</div></div>
 <div id="telaPendente" class="caixa oculto"><strong>DISPOSITIVO A AGUARDAR AUTORIZAÇÃO</strong><div style="margin-top:10px;color:#bbb">Informe este código ao administrador:</div><div id="codigoDispositivo" class="codigo">------</div><button onclick="verificarAutorizacao()">VERIFICAR AUTORIZAÇÃO</button></div>
-<div id="telaScanner" class="oculto">
-<div id="posto" class="posto">Dispositivo autorizado</div>
-<div id="camera"><video id="video" autoplay playsinline muted></video><div class="mira"></div></div>
-<div class="instrucao">Mantenha o QR Code dentro do quadrado</div>
-<button id="btnCamera" type="button" onclick="iniciarCamera()">ABRIR CÂMARA</button>
-<div id="estado" class="neutro"><div id="estadoTitulo">PRONTO</div><div id="estadoTexto">Toque em ABRIR CÂMARA para iniciar.</div><div id="detalhes"></div></div>
-<div id="debug"></div>
-</div></div>
+<div id="telaScanner" class="oculto"><div id="posto" class="posto">Dispositivo autorizado</div><div id="camera"><video id="video" autoplay playsinline muted></video><div class="mira"></div></div><div class="instrucao">Mantenha o QR Code dentro do quadrado</div><button id="btnCamera" type="button" onclick="iniciarCamera()">ABRIR CÂMARA</button><div id="estado" class="neutro"><div id="estadoTitulo">PRONTO</div><div id="estadoTexto">Toque em ABRIR CÂMARA para iniciar.</div><div id="detalhes"></div></div><div id="debug"></div></div>
+</div>
 <iframe name="ponteSIGE" id="ponteSIGE" class="oculto"></iframe>
 <form id="formSIGE" class="oculto" method="POST" target="ponteSIGE" action="https://script.google.com/macros/s/AKfycbzu5e1FsbkE2EjYmZJNB59A0OVrZKSFOBYjm_ecgi-yI-pSew5gjaalRxSXZy0HigHr/exec"><input name="acao" id="fAcao"><input name="token" id="fToken"><input name="pedidoId" id="fPedidoId"><textarea name="dadosQR" id="fDadosQR"></textarea></form>
 <script>
 const CHAVE_TOKEN="SIGE_GALA33_SCANNER_TOKEN";
 const video=document.getElementById("video"),btnCamera=document.getElementById("btnCamera"),estado=document.getElementById("estado"),estadoTitulo=document.getElementById("estadoTitulo"),estadoTexto=document.getElementById("estadoTexto"),detalhes=document.getElementById("detalhes"),debug=document.getElementById("debug");
-function lerTokenLocal(){try{return localStorage.getItem(CHAVE_TOKEN)||""}catch(e){return ""}}
-function guardarTokenLocal(v){try{localStorage.setItem(CHAVE_TOKEN,v)}catch(e){}}
+function lerCookie(){const m=document.cookie.match(new RegExp('(?:^|; )'+CHAVE_TOKEN+'=([^;]*)'));return m?decodeURIComponent(m[1]):""}
+function guardarCookie(v){document.cookie=CHAVE_TOKEN+'='+encodeURIComponent(v)+'; max-age=31536000; path=/; SameSite=Lax; Secure'}
+function lerTokenLocal(){let v="";try{v=localStorage.getItem(CHAVE_TOKEN)||""}catch(e){}if(!v)v=lerCookie();return v}
+function guardarTokenLocal(v){let ok=false;try{localStorage.setItem(CHAVE_TOKEN,v);ok=localStorage.getItem(CHAVE_TOKEN)===v}catch(e){}guardarCookie(v);return ok||lerCookie()===v}
 function criarTokenLocal(){try{if(window.crypto&&crypto.randomUUID)return crypto.randomUUID().replace(/-/g,"")}catch(e){}return "web_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2)}
-let token=lerTokenLocal();if(!token){token=criarTokenLocal();guardarTokenLocal(token)}
+let token=lerTokenLocal();let tokenJaExistia=!!token;if(!token){token=criarTokenLocal();if(!guardarTokenLocal(token)){token=""}}
 let streamActual=null,detectorQR=null,leituraActiva=false,processando=false,ultimoCodigo="",ultimaLeitura=0,pedidoPendente="",timerResposta=null,audioCtx=null;
-window.addEventListener("load",()=>enviarSIGE("solicitar",""));window.addEventListener("message",receberSIGE);window.addEventListener("beforeunload",pararCamera);
+window.addEventListener("load",iniciarLigacao);window.addEventListener("message",receberSIGE);window.addEventListener("beforeunload",pararCamera);
+function iniciarLigacao(){if(!token){mostrarFalhaIdentificacao();return}enviarSIGE(tokenJaExistia?"verificar":"solicitar","")}
 function idPedido(){return Date.now()+"_"+Math.random().toString(36).slice(2,8)}
-function enviarSIGE(acao,dadosQR){if(pedidoPendente)return;if(!token){mostrarFalhaIdentificacao();return}pedidoPendente=idPedido();document.getElementById("fAcao").value=acao;document.getElementById("fToken").value=token;document.getElementById("fPedidoId").value=pedidoPendente;document.getElementById("fDadosQR").value=dadosQR||"";document.getElementById("formSIGE").submit();clearTimeout(timerResposta);timerResposta=setTimeout(()=>{pedidoPendente="";if(acao==="validar"){processando=false;ultimoCodigo="";mostrarEstado("vermelho","SEM LIGAÇÃO","Não foi possível comunicar com o SIGE. Tente novamente.");sinalErro();setTimeout(pronto,3500)}},12000)}
-function receberSIGE(ev){const r=ev.data;if(!r||r.canal!=="SIGE_GALA33")return;if(pedidoPendente&&r.pedidoId&&r.pedidoId!==pedidoPendente)return;clearTimeout(timerResposta);pedidoPendente="";if(r.acao==="solicitar"){const d=r.dispositivo||{};if(d.token&&d.token!==token){token=d.token;guardarTokenLocal(token)}tratarDispositivo(d);return}if(r.acao==="verificar"){tratarAcesso(r.acesso||{});return}if(r.acao==="validar"){tratarResultado(r)}}
+function enviarSIGE(acao,dadosQR){if(pedidoPendente)return;if(!token){mostrarFalhaIdentificacao();return}pedidoPendente=idPedido();document.getElementById("fAcao").value=acao;document.getElementById("fToken").value=token;document.getElementById("fPedidoId").value=pedidoPendente;document.getElementById("fDadosQR").value=dadosQR||"";document.getElementById("formSIGE").submit();clearTimeout(timerResposta);timerResposta=setTimeout(()=>{pedidoPendente="";if(acao==="validar"){processando=false;ultimoCodigo="";mostrarEstado("vermelho","SEM LIGAÇÃO","Não foi possível comunicar com o SIGE. Tente novamente.");sinalErro();setTimeout(pronto,3500)}else{mostrarErroLigacao()}},12000)}
+function receberSIGE(ev){const r=ev.data;if(!r||r.canal!=="SIGE_GALA33")return;if(pedidoPendente&&r.pedidoId&&r.pedidoId!==pedidoPendente)return;clearTimeout(timerResposta);pedidoPendente="";if(r.acao==="solicitar"){const d=r.dispositivo||{};if(d.token){token=d.token;if(!guardarTokenLocal(token)){mostrarFalhaIdentificacao();return}}tokenJaExistia=true;tratarDispositivo(d);return}if(r.acao==="verificar"){tratarAcesso(r.acesso||{});return}if(r.acao==="validar"){tratarResultado(r)}}
 function tratarDispositivo(d){document.getElementById("telaLigacao").classList.add("oculto");if(d.estado==="AUTORIZADO"){abrirScanner(d.nome||"POSTO DE ENTRADA");return}document.getElementById("telaScanner").classList.add("oculto");document.getElementById("telaPendente").classList.remove("oculto");document.getElementById("codigoDispositivo").textContent=d.codigo||"------"}
 function verificarAutorizacao(){if(!token){mostrarFalhaIdentificacao();return}enviarSIGE("verificar","")}
-function mostrarFalhaIdentificacao(){document.getElementById("telaLigacao").classList.add("oculto");document.getElementById("telaScanner").classList.add("oculto");document.getElementById("telaPendente").classList.remove("oculto");document.getElementById("codigoDispositivo").textContent="ERRO";alert("Não foi possível conservar a identificação deste telefone. Feche o modo privado e abra o scanner novamente.")}
-function tratarAcesso(a){if(a.autorizado){abrirScanner(a.nome||"POSTO DE ENTRADA")}else{document.getElementById("telaScanner").classList.add("oculto");document.getElementById("telaPendente").classList.remove("oculto");if(a.codigo)document.getElementById("codigoDispositivo").textContent=a.codigo}}
+function mostrarErroLigacao(){document.getElementById("telaLigacao").classList.remove("oculto");document.getElementById("telaLigacao").innerHTML='<strong>SEM RESPOSTA DO SIGE</strong><div style="margin-top:8px;color:#bbb">Verifique a Internet e actualize a página.</div>'}
+function mostrarFalhaIdentificacao(){document.getElementById("telaLigacao").classList.add("oculto");document.getElementById("telaScanner").classList.add("oculto");document.getElementById("telaPendente").classList.remove("oculto");document.getElementById("codigoDispositivo").textContent="ERRO";alert("Este navegador não conseguiu guardar a identificação do telefone. Use o Chrome normal, fora do modo privado.")}
+function tratarAcesso(a){document.getElementById("telaLigacao").classList.add("oculto");if(a.autorizado){abrirScanner(a.nome||"POSTO DE ENTRADA");return}if(a.motivo==="NAO_REGISTADO"){enviarSIGE("solicitar","");return}document.getElementById("telaScanner").classList.add("oculto");document.getElementById("telaPendente").classList.remove("oculto");if(a.codigo)document.getElementById("codigoDispositivo").textContent=a.codigo}
 function abrirScanner(nome){document.getElementById("telaLigacao").classList.add("oculto");document.getElementById("telaPendente").classList.add("oculto");document.getElementById("telaScanner").classList.remove("oculto");document.getElementById("posto").innerHTML="<strong>"+esc(nome)+"</strong><br>Dispositivo autorizado"}
 function mostrarEstado(classe,titulo,texto,extra=""){estado.className=classe;estadoTitulo.textContent=titulo;estadoTexto.textContent=texto;detalhes.innerHTML=extra}
 function pronto(){processando=false;ultimoCodigo="";mostrarEstado("neutro","PRONTO","Aponte para o próximo QR Code.");debug.textContent="Câmara activa"}
